@@ -36,7 +36,7 @@ namespace Bot_Application1
         {
             if (_linguisticsClient == null || _analyzerTagGuid == Guid.Empty || _analyzerWordGuid == Guid.Empty)
             {
-                Initialize();
+                await Initialize();
             }
 
             if (activity.Type == ActivityTypes.Message)
@@ -44,47 +44,10 @@ namespace Bot_Application1
                 ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
                 try
                 {
-                    var tags = await AnalyzeTags(activity.Text);
-                    var words = await AnalyzeWords(activity.Text);
+                    var responseMessage = await ProceedMessage(activity.Text);
                     
-                    for (int i = 0; i < words.Count; i++)
-                    {
-                        var currentTypes = _testBotAIEntities.WordTypes.ToList();
-
-
-                        if (currentTypes.All(x => x.Name != tags[i]))
-                        {
-                            var newWordType = new WordType() { Name = tags[i] };
-                            _testBotAIEntities.WordTypes.Add(newWordType);
-                            _testBotAIEntities.SaveChanges();
-                        }
-
-                        currentTypes = _testBotAIEntities.WordTypes.ToList();
-                        var currentWords = _testBotAIEntities.Words.ToList();
-                        if (currentWords.All(x => x.Name != words[i]))
-                        {
-                            var newWord = new Word() { Name = words[i], WordType = currentTypes.First(x => x.Name == tags[i]) };
-                            _testBotAIEntities.Words.Add(newWord);
-                            _testBotAIEntities.SaveChanges();
-                        }
-
-
-                    }
-
-                    var alllWords = _testBotAIEntities.Words.ToList();
-                    var sb = new StringBuilder();
-
-                    var rand = new Random();
-                    for (int i = 0; i < tags.Count; i++)
-                    {
-                        var possibleWords = alllWords.Where(x => x.WordType.Name == tags[i]).ToList();
-                        sb.Append(possibleWords.ElementAt(rand.Next(possibleWords.Count)).Name + " ");
-                    }
-
-
-                    Activity reply = activity.CreateReply(sb.ToString());
+                    Activity reply = activity.CreateReply(responseMessage);
                     await connector.Conversations.ReplyToActivityAsync(reply);
-
                 }
                 catch (Exception)
                 {
@@ -99,9 +62,80 @@ namespace Bot_Application1
             var response = Request.CreateResponse(HttpStatusCode.OK);
             return response;
         }
-        
 
-        public static async void Initialize()
+        private static async Task AddTagsToDictionary(List<KeyValuePair<string, string>> tgwPairList)
+        {
+            var currentTypes = _testBotAIEntities.WordTypes.ToList();
+
+            foreach (var tag in tgwPairList.Select(x => x.Value).Distinct())
+            {
+                if (currentTypes.All(x => x.Name != tag))
+                {
+                    var newWordType = new WordType() { Name = tag };
+                    _testBotAIEntities.WordTypes.Add(newWordType);
+                }
+            }
+
+            _testBotAIEntities.SaveChanges();
+        }
+
+        private static async Task AddWordsToDictionary(List<KeyValuePair<string, string>> tgwPairList)
+        {
+            var currentTypes = _testBotAIEntities.WordTypes.ToList();
+            var currentWords = _testBotAIEntities.Words.ToList();
+
+            foreach (var tgw in tgwPairList.Distinct())
+            {
+                if (currentWords.All(x => x.Name != tgw.Key))
+                {
+                    var newWord = new Word() { Name = tgw.Key, WordType = currentTypes.First(x => x.Name == tgw.Value) };
+                    _testBotAIEntities.Words.Add(newWord);
+                }
+            }
+
+            _testBotAIEntities.SaveChanges();
+        }
+
+
+        private static async Task FillDictionary(List<KeyValuePair<string, string>> tgwPairList)
+        {
+            await AddTagsToDictionary(tgwPairList);
+            await AddWordsToDictionary(tgwPairList);
+        }
+
+        private static async Task<string> ProceedMessage(string msg)
+        {
+            var tags = await AnalyzeTags(msg);
+            var words = await AnalyzeWords(msg);
+
+            var tagsAndWords = words.Zip(tags, (word, tag) => new KeyValuePair<string, string>(word, tag)).ToList();
+
+            // All words, except that come from message
+            var filteredWords = _testBotAIEntities.Words.ToList().Where(x => !tagsAndWords.Select(y => y.Key).Contains(x.Name));
+
+            var sb = new StringBuilder();
+            var rand = new Random();
+
+            foreach (var tgw in tagsAndWords)
+            {
+                var possibleWords = filteredWords.Where(x => x.WordType.Name == tgw.Value).ToList();
+
+                if (possibleWords.Count > 0)
+                {
+                    sb.Append(possibleWords.ElementAt(rand.Next(possibleWords.Count)).Name + " ");
+                }
+                else
+                {
+                    sb.Append(tgw.Key);
+                }
+            }
+
+            FillDictionary(tagsAndWords);
+
+            return sb.ToString();
+        }
+
+        public static async Task Initialize()
         {
             if (_testBotAIEntities == null)
             {
@@ -114,13 +148,11 @@ namespace Bot_Application1
 
             }
 
-            if (_analyzerTagGuid == Guid.Empty || _analyzerWordGuid == Guid.Empty)
-            {
-                var Analyzers = await _linguisticsClient.ListAnalyzersAsync();
+            if (_analyzerTagGuid != Guid.Empty && _analyzerWordGuid != Guid.Empty) return;
 
-                _analyzerTagGuid = Analyzers[0].Id;
-                _analyzerWordGuid = Analyzers[2].Id;
-            }
+            var analyzers = await _linguisticsClient.ListAnalyzersAsync();
+            _analyzerTagGuid = analyzers[0].Id;
+            _analyzerWordGuid = analyzers[2].Id;
         }
 
         private static async Task<List<string>> AnalyzeTags(string s)

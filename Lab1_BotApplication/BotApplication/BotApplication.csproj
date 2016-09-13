@@ -192,7 +192,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\..\Desktop\Cognitive-LinguisticAnalysis-Windows-master\Cognitive-LinguisticAnalysis-Windows-master\ClientLibrary\LinguisticsClient.csproj">
+    <ProjectReference Include="..\ClientLibrary\LinguisticsClient.csproj">
       <Project>{8388E984-34E1-443D-9F04-D588DC4BBB22}</Project>
       <Name>LinguisticsClient</Name>
     </ProjectReference>
